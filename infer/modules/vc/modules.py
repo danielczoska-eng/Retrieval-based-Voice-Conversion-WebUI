@@ -97,10 +97,17 @@ class VC:
                 "",
                 "",
             )
-        person = f'{os.getenv("weight_root")}/{sid}'
+        weight_root = os.getenv("weight_root")
+        if not (
+            isinstance(sid, str)
+            and sid.endswith(".pth")
+            and sid in os.listdir(weight_root)
+        ):
+            raise ValueError(f"Invalid model name: {sid!r}")
+        person = os.path.join(weight_root, sid)
         logger.info(f"Loading: {person}")
 
-        self.cpt = torch.load(person, map_location="cpu")
+        self.cpt = torch.load(person, map_location="cpu", weights_only=True)
         self.tgt_sr = self.cpt["config"][-1]
         self.cpt["config"][-3] = self.cpt["weight"]["emb_g.weight"].shape[0]  # n_spk
         self.if_f0 = self.cpt.get("f0", 1)

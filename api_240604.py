@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import re
+import secrets
 import time
 import librosa
 import torch
@@ -11,7 +12,7 @@ import torch.nn.functional as F
 import torchaudio.transforms as tat
 import sounddevice as sd
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 import threading
 import uvicorn
@@ -22,8 +23,34 @@ from multiprocessing import Queue, Process, cpu_count, freeze_support
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+API_TOKEN = ""
+
+
+def verify_token(request: Request):
+    auth = request.headers.get("authorization", "")
+    token = auth[7:] if auth.lower().startswith("bearer ") else ""
+    token = token or request.headers.get("x-api-token", "")
+    if not API_TOKEN or not secrets.compare_digest(token.encode(), API_TOKEN.encode()):
+        raise HTTPException(status_code=401, detail="Invalid or missing API token")
+
+
+def resolve_within(path: str, roots, suffix: str, label: str) -> str:
+    real = os.path.realpath(path.strip())
+    if not real.lower().endswith(suffix):
+        raise HTTPException(status_code=400, detail=f"{label} must be a {suffix} file")
+    for root in roots:
+        root = os.path.realpath(root)
+        if os.path.commonpath([real, root]) == root:
+            if not os.path.isfile(real):
+                raise HTTPException(status_code=400, detail=f"{label} does not exist")
+            return real
+    raise HTTPException(
+        status_code=400, detail=f"{label} must be inside: {', '.join(roots)}"
+    )
+
+
 # Define FastAPI app
-app = FastAPI()
+app = FastAPI(dependencies=[Depends(verify_token)])
 
 class GUIConfig:
     def __init__(self) -> None:
@@ -146,10 +173,25 @@ class AudioAPI:
             raise HTTPException(status_code=400, detail="Please select a .pth file")
         if not values.index_path.strip():
             raise HTTPException(status_code=400, detail="Please select an index file")
+        pth_path = resolve_within(
+            values.pth_path,
+            [os.getenv("weight_root") or "assets/weights"],
+            ".pth",
+            "pth_path",
+        )
+        index_path = resolve_within(
+            values.index_path,
+            [
+                os.getenv("index_root") or "logs",
+                os.getenv("outside_index_root") or "assets/indices",
+            ],
+            ".index",
+            "index_path",
+        )
         self.set_devices(values.sg_input_device, values.sg_output_device)
         self.config.use_jit = False
-        self.gui_config.pth_path = values.pth_path
-        self.gui_config.index_path = values.index_path
+        self.gui_config.pth_path = pth_path
+        self.gui_config.index_path = index_path
         self.gui_config.threhold = values.threhold
         self.gui_config.pitch = values.pitch
         self.gui_config.formant = values.formant
@@ -562,4 +604,8 @@ if __name__ == "__main__":
     from configs.config import Config
     audio_api.config = Config()
     audio_api.initialize_queues()
-    uvicorn.run(app, host="0.0.0.0", port=6242)
+    API_TOKEN = os.getenv("RVC_API_TOKEN") or secrets.token_urlsafe(32)
+    if not os.getenv("RVC_API_TOKEN"):
+        print(f"RVC_API_TOKEN not set; generated token for this run: {API_TOKEN}")
+    host = os.getenv("RVC_API_HOST", "127.0.0.1")
+    uvicorn.run(app, host=host, port=6242)

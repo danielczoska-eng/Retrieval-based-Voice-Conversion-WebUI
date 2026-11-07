@@ -1,3 +1,4 @@
+import ast
 import os
 import sys
 from dotenv import load_dotenv
@@ -778,21 +779,35 @@ def train1key(
     yield get_info_str(i18n("全流程结束！"))
 
 
+def _is_under_allowed_dir(path):
+    real_path = os.path.realpath(path)
+    for root in (os.path.join(now_dir, "logs"), weight_root):
+        real_root = os.path.realpath(root)
+        try:
+            if os.path.commonpath([real_path, real_root]) == real_root:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
 #                    ckpt_path2.change(change_info_,[ckpt_path2],[sr__,if_f0__])
 def change_info_(ckpt_path):
-    if not os.path.exists(ckpt_path.replace(os.path.basename(ckpt_path), "train.log")):
-        return {"__type__": "update"}, {"__type__": "update"}, {"__type__": "update"}
+    no_update = {"__type__": "update"}, {"__type__": "update"}, {"__type__": "update"}
+    if not ckpt_path or not _is_under_allowed_dir(ckpt_path):
+        return no_update
+    train_log = os.path.join(os.path.dirname(os.path.realpath(ckpt_path)), "train.log")
+    if not os.path.exists(train_log):
+        return no_update
     try:
-        with open(
-            ckpt_path.replace(os.path.basename(ckpt_path), "train.log"), "r"
-        ) as f:
-            info = eval(f.read().strip("\n").split("\n")[0].split("\t")[-1])
+        with open(train_log, "r") as f:
+            info = ast.literal_eval(f.read().strip("\n").split("\n")[0].split("\t")[-1])
             sr, f0 = info["sample_rate"], info["if_f0"]
             version = "v2" if ("version" in info and info["version"] == "v2") else "v1"
             return sr, str(f0), version
     except:
         traceback.print_exc()
-        return {"__type__": "update"}, {"__type__": "update"}, {"__type__": "update"}
+        return no_update
 
 
 F0GPUVisible = config.dml == False

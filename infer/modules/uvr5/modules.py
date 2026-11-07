@@ -1,4 +1,5 @@
 import os
+import subprocess
 import traceback
 import logging
 
@@ -13,6 +14,16 @@ from infer.modules.uvr5.vr import AudioPre, AudioPreDeEcho
 
 config = Config()
 
+opt_root = os.path.realpath(os.path.join(os.getcwd(), "opt"))
+allowed_formats = ["wav", "flac", "mp3", "m4a"]
+
+
+def resolve_output_root(save_root):
+    save_root = os.path.realpath(save_root or opt_root)
+    if os.path.commonpath([save_root, opt_root]) != opt_root:
+        raise ValueError("Output folder must be inside %s" % opt_root)
+    return save_root
+
 
 def uvr(model_name, inp_root, save_root_vocal, paths, save_root_ins, agg, format0):
     infos = []
@@ -24,6 +35,10 @@ def uvr(model_name, inp_root, save_root_vocal, paths, save_root_ins, agg, format
         save_root_ins = (
             save_root_ins.strip(" ").strip('"').strip("\n").strip('"').strip(" ")
         )
+        save_root_vocal = resolve_output_root(save_root_vocal)
+        save_root_ins = resolve_output_root(save_root_ins)
+        if format0 not in allowed_formats:
+            raise ValueError("Unsupported format: %s" % format0)
         if model_name == "onnx_dereverb_By_FoxJoy":
             pre_fun = MDXNetDereverb(15, config.device)
         else:
@@ -64,9 +79,21 @@ def uvr(model_name, inp_root, save_root_vocal, paths, save_root_ins, agg, format
                     os.path.join(os.environ["TEMP"]),
                     os.path.basename(inp_path),
                 )
-                os.system(
-                    'ffmpeg -i "%s" -vn -acodec pcm_s16le -ac 2 -ar 44100 "%s" -y'
-                    % (inp_path, tmp_path)
+                subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-i",
+                        inp_path,
+                        "-vn",
+                        "-acodec",
+                        "pcm_s16le",
+                        "-ac",
+                        "2",
+                        "-ar",
+                        "44100",
+                        tmp_path,
+                        "-y",
+                    ]
                 )
                 inp_path = tmp_path
             try:

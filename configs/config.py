@@ -52,12 +52,14 @@ class Config:
         self.gpu_mem = None
         (
             self.python_cmd,
+            self.listen_host,
             self.listen_port,
             self.iscolab,
             self.noparallel,
             self.noautoopen,
             self.dml,
         ) = self.arg_parse()
+        self.auth = self.load_auth()
         self.instead = ""
         self.preprocess_per = 3.7
         self.x_pad, self.x_query, self.x_center, self.x_max = self.device_config()
@@ -77,6 +79,12 @@ class Config:
     def arg_parse() -> tuple:
         exe = sys.executable or "python"
         parser = argparse.ArgumentParser()
+        parser.add_argument(
+            "--host",
+            type=str,
+            default="127.0.0.1",
+            help="Listen host; use 0.0.0.0 to expose on the network (set RVC_WEBUI_AUTH)",
+        )
         parser.add_argument("--port", type=int, default=7865, help="Listen port")
         parser.add_argument("--pycmd", type=str, default=exe, help="Python command")
         parser.add_argument("--colab", action="store_true", help="Launch in colab")
@@ -99,12 +107,23 @@ class Config:
 
         return (
             cmd_opts.pycmd,
+            cmd_opts.host,
             cmd_opts.port,
             cmd_opts.colab,
             cmd_opts.noparallel,
             cmd_opts.noautoopen,
             cmd_opts.dml,
         )
+
+    @staticmethod
+    def load_auth():
+        auth = os.getenv("RVC_WEBUI_AUTH", "")
+        if not auth:
+            return None
+        username, sep, password = auth.partition(":")
+        if not sep or not username or not password:
+            raise ValueError("RVC_WEBUI_AUTH must be in the form username:password")
+        return (username, password)
 
     # has_mps is only available in nightly pytorch (for now) and MasOS 12.3+.
     # check `getattr` and try it for compatibility
